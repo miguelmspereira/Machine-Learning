@@ -1,0 +1,131 @@
+---
+title: "Final Project - Practical Machine Learning"
+author: "Miguel Pereira"
+date: "April 30, 2016"
+output: html_document
+---
+
+This HTML describes the procedure followed to create an algorithm to determine if a person is performing a dumbell lift correctly using data from 6 subjects with accelerometers in 4 different locations. The data comes from this source: http://groupware.les.inf.puc-rio.br/har.
+(NOTE: The exploratory analysis of the dataset is 'commented out' to reduce the length of the HTML file)
+
+```{r}
+#Getting the training and testing datasets and checking the structure of the data provided.
+training<-read.csv(url('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'),na.strings= c("NA",""," "))
+testing<-read.csv(url('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'),na.strings= c("NA",""," "))
+
+
+#dim(training) #nrow (measurements)=19622   ncol(variables)=159
+#training[1:10,1:10]
+#names(training)
+
+#dim(testing) #nrow (measurements)=20   ncol(variables)=159
+#testing[1:10,1:10]
+
+#Outcome variable
+#summary(training$classe)
+#class(training$classe) #It is a factor variable with 5 levels
+
+#Cleaning the dataset
+#1)Removing missing values
+trainingNA <- apply(training, 2, function(x) {sum(is.na(x))})
+trainingNoNA<-training[,which(trainingNA == 0)]
+#dim(trainingNoNA)
+#trainingNoNA[1:10,1:10]
+
+testingNA <- apply(testing, 2, function(x) {sum(is.na(x))})
+testingNoNA<-testing[,which(testingNA == 0)]
+
+#2)Removing identifier columns
+trainingClean<-trainingNoNA[,8:ncol(trainingNoNA)]
+#dim(trainingClean)
+#trainingClean[1:10,1:10]
+
+testingClean<-testingNoNA[,8:ncol(testingNoNA)]
+test<-testingClean
+#dim(test)
+#test[1:10,1:10]
+```
+
+Classe=A corresponds to the correct exercise whereas the other classes's correspond to common mistakes according to the supporting information in the website provided (http://groupware.les.inf.puc-rio.br/har).
+
+
+```{r, echo=FALSE}
+
+```
+
+
+#Cross-Validation
+To be have a better idea of what the test set accuracy is, the training dataset will be sub-split in two, a training and a cross-validation set, in a 70/30 ratio:
+
+```{r}
+library(caret)
+
+set.seed(123) #to ensure reproducibility
+
+inTrain <- createDataPartition(y = trainingClean$classe, p = 0.7, list = FALSE)
+train <- trainingClean[inTrain, ]
+crossVal <- trainingClean[-inTrain, ]
+```
+
+
+#Building a model
+The dataset is composed of many variables and therefore we can consider summarizing these using principal component anaylsis. First, we will check the correlation between the variables by means of a correlation plot.
+```{r}
+# plotting a correlation matrix
+#install.packages('corrplot')
+library(corrplot)
+M <- abs(cor(train[,-ncol(train)]))
+M2 <- cor(train[,-ncol(train)])
+corrplot(M2, order = "FPC", method = "circle", type = "lower", tl.cex = 0.8,  tl.col = rgb(0, 0, 0))
+
+diag(M)<-0
+length(which(M>0.8))
+```
+
+The variables are relatively correlated with each other. Thefore, we can summarize the data as follows, thus getting only 12 predictors as opposed to 52:
+
+```{r}
+#Principal component analysis
+trainPca<-preProcess(train[,-ncol(train)],method='pca',thresh=0.8)
+trainPC<-predict(trainPca,train[,-ncol(train)])
+```
+
+
+We selected a random forest model to predict the classification because it has methods for balancing error in class population unbalanced data sets. The correlation between any two trees in the forest increases the forest error rate.
+In this case, we will fit a random forest model with all the variables and with the principal components only provided that including all the variables is not computationally too demanding:
+
+```{r}
+#Random forest model - all variables
+library(randomForest)
+set.seed(124)
+modFit<-randomForest(classe~.,data=train)
+predCrossVal<-predict(modFit,crossVal)
+modFit
+
+#Accuracy
+confusionMatrix(crossVal$classe,predCrossVal)
+```
+
+```{r}
+#Random forest model - only PCs
+set.seed(125)
+modFitPC<-randomForest(train$classe~.,data=trainPC)
+crossValPC<-predict(trainPca,crossVal[,-ncol(crossVal)])
+modFitPC
+predCrossValPC<-predict(modFitPC,crossValPC)
+
+#Accuracy
+confusionMatrix(crossVal$classe,predCrossValPC)
+```
+
+The OOB error rate is 0.6% for the model with all the variables and 4.16% for the model with only the PCs.
+The accuracies are 99.4% and 95.6% for the models will all the variables and only the PCs, respectively.
+Because the running time of the model with all the variables was not significantly greater than the running time of the model with only the PCs, we will keep the firts model since it shows better OOB error rate and accuracy (NOTE: this is to be expected since the PCs contain less information than the full model which increases the error rate and accuracy).
+
+#Making predictions
+Using the testing dataset with 20 observations that was loaded in the begining, we can fit the model and see how well it works in this testing dataset.
+
+```{r}
+pred<-predict(modFit,test)
+pred
+```
